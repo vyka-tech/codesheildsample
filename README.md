@@ -1,6 +1,6 @@
 # codesheildsample
 
-Intentionally vulnerable Java 17 AWS Lambda, used as a test target for CodeShield AI.
+Intentionally vulnerable Java 17 AWS Lambda (ZIP package), used as a test target for CodeShield AI.
 
 > ⚠️ The dependency versions in `pom.xml` are deliberately outdated and have known CVEs.
 > Do not reuse them. The function has no public URL and can only be invoked with AWS credentials.
@@ -18,16 +18,19 @@ Intentionally vulnerable Java 17 AWS Lambda, used as a test target for CodeShiel
 
 ## How it fits CodeShield AI
 
-- Deployed as a **Lambda container image** in ECR repo `codesheildsample`. Amazon Inspector scans the image
-  and reports findings against that ECR repo, which is how CodeShield finds them.
-- `docker build .` runs the full Maven build, which is the command CodeShield uses to validate fixes.
+- Deployed as a **ZIP Lambda** (`java17`). `mvn package` builds `target/codesheildsample.zip` with classes at the
+  root and each dependency jar in `lib/`.
+- **Amazon Inspector Lambda standard scanning** scans those jars and reports findings against the function name.
+  In CodeShield, register this repo and pick the `codesheildsample` Lambda function as its scan target.
+- The `Dockerfile` is a **build check only**: `docker build .` runs the Maven build, which is how CodeShield
+  validates a fix. It is not used for deployment.
 
 ## Build and deploy
 
-Requires Docker, the AWS CLI and a profile with ECR, Lambda and IAM access.
+Requires the AWS CLI, plus Maven or Docker.
 
 ```powershell
-.\deploy.ps1 -Profile yogiltd          # build, push to ECR, create/update Lambda, smoke test
+.\deploy.ps1 -Profile yogiltd          # build the zip, create/update the Lambda, smoke test
 ```
 
 Invoke manually:

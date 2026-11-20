@@ -80,22 +80,26 @@
 
     <build>
         <plugins>
-            <!-- Copy runtime jars to target/dependency so the Dockerfile can place them in
-                 ${LAMBDA_TASK_ROOT}/lib as individual jars (lets Inspector detect each one). -->
+            <!-- Build the Lambda deployment zip: classes at the root, every runtime jar under lib/.
+                 Keeping jars separate lets Amazon Inspector identify each vulnerable package. -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-dependency-plugin</artifactId>
-                <version>3.6.1</version>
+                <artifactId>maven-assembly-plugin</artifactId>
+                <version>3.7.1</version>
+                <configuration>
+                    <descriptors>
+                        <descriptor>src/assembly/lambda-zip.xml</descriptor>
+                    </descriptors>
+                    <finalName>${project.artifactId}</finalName>
+                    <appendAssemblyId>false</appendAssemblyId>
+                </configuration>
                 <executions>
                     <execution>
-                        <id>copy-dependencies</id>
+                        <id>lambda-zip</id>
                         <phase>package</phase>
                         <goals>
-                            <goal>copy-dependencies</goal>
+                            <goal>single</goal>
                         </goals>
-                        <configuration>
-                            <includeScope>runtime</includeScope>
-                        </configuration>
                     </execution>
                 </executions>
             </plugin>

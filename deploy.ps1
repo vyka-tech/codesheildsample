@@ -1,21 +1,23 @@
 <#
 .SYNOPSIS
-  Build the sample as a Lambda container image, push it to ECR and create/update the Lambda.
+  Build the sample as a Lambda ZIP package and create/update the Lambda (java17 runtime).
+  Amazon Inspector (Lambda standard scanning) scans the jars inside the zip.
 
 .EXAMPLE
   .\deploy.ps1 -Profile yogiltd
 #>
 param(
-    [string]$Profile      = "yogiltd",
-    [string]$Region       = "eu-west-1",
-    [string]$Name         = "codesheildsample",   # ECR repo + Lambda function name (must match the GitHub repo name for CodeShield)
-    [string]$Tag          = "latest"
+    [string]$Profile = "yogiltd",
+    [string]$Region  = "eu-west-1",
+    [string]$Name    = "codesheildsample"   # Lambda function name
 )
 
-# "Continue" because docker/aws write normal progress to stderr, which Windows PowerShell 5.1
+# "Continue" because docker/aws/mvn write normal progress to stderr, which Windows PowerShell 5.1
 # would otherwise treat as a terminating error. Failures are detected via exit codes instead.
 $ErrorActionPreference = "Continue"
-$aws = @("--region", $Region, "--profile", $Profile)
+$aws     = @("--region", $Region, "--profile", $Profile)
+$handler = "com.codeshield.sample.Handler::handleRequest"
+$zipPath = Join-Path $PSScriptRoot "target\$Name.zip"
 
 function Invoke-Checked([scriptblock]$Cmd, [string]$What) {
     & $Cmd
@@ -28,26 +30,25 @@ function Test-AwsResource([scriptblock]$Cmd) {
     return ($LASTEXITCODE -eq 0)
 }
 
-$account  = (aws sts get-caller-identity @aws --query Account --output text).Trim()
+$account = (aws sts get-caller-identity @aws --query Account --output text)
 if ($LASTEXITCODE -ne 0 -or -not $account) { throw "AWS credentials for profile '$Profile' are not valid" }
-$registry = "$account.dkr.ecr.$Region.amazonaws.com"
-$imageUri = "$registry/${Name}:$Tag"
-Write-Host "Account $account | Region $Region | Image $imageUri"
+Write-Host "Account $($account.Trim()) | Region $Region | Function $Name"
 
-# 1. ECR repository
-if (-not (Test-AwsResource { aws ecr describe-repositories --repository-names $Name @aws })) {
-    Write-Host "Creating ECR repository $Name"
-    Invoke-Checked { aws ecr create-repository --repository-name $Name @aws | Out-Null } "ECR create"
+# 1. Build target/<name>.zip (Maven locally, or inside Docker when Maven is not installed)
+if (Get-Command mvn -ErrorAction SilentlyContinue) {
+    Push-Location $PSScriptRoot
+    try { Invoke-Checked { mvn -q -B clean package -DskipTests } "Maven build" } finally { Pop-Location }
+} else {
+    Write-Host "Maven not found, building in Docker"
+    Invoke-Checked { docker build -t "$Name-build" $PSScriptRoot } "docker build"
+    $cid = (docker create "$Name-build").Trim()
+    New-Item -ItemType Directory -Force (Split-Path $zipPath) | Out-Null
+    try { Invoke-Checked { docker cp "${cid}:/src/target/$Name.zip" $zipPath } "docker cp" } finally { docker rm $cid | Out-Null }
 }
+if (-not (Test-Path $zipPath)) { throw "Build did not produce $zipPath" }
+Write-Host ("Built {0} ({1:N0} KB)" -f $zipPath, ((Get-Item $zipPath).Length / 1KB))
 
-# 2. Build and push. --provenance=false keeps a single-platform manifest, which Lambda requires.
-Invoke-Checked { docker build --platform linux/amd64 --provenance=false -t $imageUri $PSScriptRoot } "docker build"
-$password = aws ecr get-login-password @aws
-$password | docker login --username AWS --password-stdin $registry | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "ECR login failed" }
-Invoke-Checked { docker push $imageUri } "docker push"
-
-# 3. Execution role (CloudWatch Logs only)
+# 2. Execution role (CloudWatch Logs only)
 $roleName = "$Name-lambda-role"
 if (-not (Test-AwsResource { aws iam get-role --role-name $roleName --profile $Profile })) {
     Write-Host "Creating IAM role $roleName"
@@ -62,18 +63,32 @@ if (-not (Test-AwsResource { aws iam get-role --role-name $roleName --profile $P
 }
 $roleArn = (aws iam get-role --role-name $roleName --profile $Profile --query Role.Arn --output text).Trim()
 
-# 4. Lambda function (container image). No Function URL is created: invoke only with AWS credentials.
+# 3. Lambda function (zip, java17). No Function URL is created: invoke only with AWS credentials.
+#    A function's package type cannot change, so an existing Image-based function is replaced.
+$existingType = $null
 if (Test-AwsResource { aws lambda get-function --function-name $Name @aws }) {
+    $existingType = (aws lambda get-function-configuration --function-name $Name @aws --query PackageType --output text).Trim()
+}
+if ($existingType -eq "Image") {
+    Write-Host "Replacing image-based function $Name with a zip-based one"
+    Invoke-Checked { aws lambda delete-function --function-name $Name @aws } "Lambda delete (image)"
+    $existingType = $null
+}
+
+if ($existingType) {
     Write-Host "Updating Lambda $Name"
-    Invoke-Checked { aws lambda update-function-code --function-name $Name --image-uri $imageUri @aws | Out-Null } "Lambda update"
+    Invoke-Checked { aws lambda update-function-code --function-name $Name --zip-file "fileb://$zipPath" @aws | Out-Null } "Lambda update-code"
+    Invoke-Checked { aws lambda wait function-updated-v2 --function-name $Name @aws } "Lambda wait"
+    Invoke-Checked { aws lambda update-function-configuration --function-name $Name --runtime java17 --handler $handler @aws | Out-Null } "Lambda update-config"
 } else {
     Write-Host "Creating Lambda $Name"
-    Invoke-Checked { aws lambda create-function --function-name $Name --package-type Image --code "ImageUri=$imageUri" `
-        --role $roleArn --timeout 30 --memory-size 512 --architectures x86_64 @aws | Out-Null } "Lambda create"
+    Invoke-Checked { aws lambda create-function --function-name $Name --package-type Zip --runtime java17 `
+        --handler $handler --zip-file "fileb://$zipPath" --role $roleArn --timeout 30 --memory-size 512 `
+        --architectures x86_64 @aws | Out-Null } "Lambda create"
 }
 Invoke-Checked { aws lambda wait function-updated-v2 --function-name $Name @aws } "Lambda wait"
 
-# 5. Smoke test
+# 4. Smoke test
 $payloadFile = Join-Path $env:TEMP "$Name-payload.json"
 Set-Content -Path $payloadFile -Value '{"name":"codeshield tester"}' -Encoding ascii
 $outFile = Join-Path $PSScriptRoot "response.json"
