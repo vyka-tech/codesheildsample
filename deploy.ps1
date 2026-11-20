@@ -88,7 +88,31 @@ if ($existingType) {
 }
 Invoke-Checked { aws lambda wait function-updated-v2 --function-name $Name @aws } "Lambda wait"
 
-# 4. Smoke test
+# 4. Public HTTPS endpoint (Lambda Function URL, no auth) so the demo page opens in a browser.
+#    The handler only accepts GET, never logs or interpolates caller input, and escapes it before echoing.
+if (-not (Test-AwsResource { aws lambda get-function-url-config --function-name $Name @aws })) {
+    Write-Host "Creating Function URL"
+    Invoke-Checked { aws lambda create-function-url-config --function-name $Name --auth-type NONE @aws | Out-Null } "Function URL create"
+}
+# Public URLs need both permissions; ignore "already exists" on re-runs
+aws lambda add-permission --function-name $Name --statement-id FunctionUrlPublicAccess `
+    --action lambda:InvokeFunctionUrl --principal "*" --function-url-auth-type NONE @aws *> $null
+$hasInvokeViaUrl = (aws lambda get-policy --function-name $Name @aws --query Policy --output text 2>$null) -match 'InvokedViaFunctionUrl'
+if (-not $hasInvokeViaUrl) {
+    # --invoked-via-function-url limits this grant to calls made through the URL. Needs a recent AWS CLI.
+    aws lambda add-permission --function-name $Name --statement-id FunctionUrlInvokeFunction `
+        --action lambda:InvokeFunction --principal "*" --invoked-via-function-url @aws *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning ("Could not add the lambda:InvokeFunction permission for the Function URL (the URL will return 403). " +
+                       "Upgrade the AWS CLI and re-run, or add it with boto3: add_permission(..., InvokedViaFunctionUrl=True).")
+    }
+}
+# Cap concurrency so a public URL cannot run up cost (skipped if the account's concurrency quota is too low)
+aws lambda put-function-concurrency --function-name $Name --reserved-concurrent-executions 5 @aws *> $null
+if ($LASTEXITCODE -ne 0) { Write-Host "Note: could not reserve concurrency (account quota too low); continuing" }
+$functionUrl = (aws lambda get-function-url-config --function-name $Name @aws --query FunctionUrl --output text).Trim()
+
+# 5. Smoke test
 $payloadFile = Join-Path $env:TEMP "$Name-payload.json"
 Set-Content -Path $payloadFile -Value '{"name":"codeshield tester"}' -Encoding ascii
 $outFile = Join-Path $PSScriptRoot "response.json"
@@ -96,3 +120,10 @@ Invoke-Checked { aws lambda invoke --function-name $Name --payload "fileb://$pay
 Remove-Item $payloadFile
 Write-Host "Lambda response:"; Get-Content $outFile
 Remove-Item $outFile
+
+# 6. HTTP smoke test through the public URL
+$health = Invoke-RestMethod -Uri ($functionUrl.TrimEnd('/') + "/api/health") -TimeoutSec 60
+Write-Host "Health: $($health.status)"
+$health.dependencies | ForEach-Object { Write-Host ("  {0,-20} {1,-10} {2}" -f $_.library, $_.version, $(if ($_.ok) { 'ok' } else { "FAIL: $($_.error)" })) }
+Write-Host "Open in a browser: $functionUrl"
+if ($health.status -ne "UP") { throw "Health check reported $($health.status)" }

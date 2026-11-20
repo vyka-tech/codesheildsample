@@ -65,11 +65,33 @@ jobs:
           fi
           grep -q '"message"' response.json
 
+      - name: HTTP health check (public URL)
+        id: health
+        run: |
+          URL=$(aws lambda get-function-url-config --function-name "$FUNCTION_NAME" --query FunctionUrl --output text)
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          # Retry briefly while the new code version warms up
+          for i in 1 2 3 4 5; do
+            code=$(curl -s -o health.json -w '%{http_code}' "${URL%/}/api/health") && [ "$code" = "200" ] && break
+            sleep 5
+          done
+          echo "HTTP $code"; cat health.json; echo
+          if [ "$code" != "200" ]; then
+            echo "::error::Health check failed (HTTP $code)"
+            exit 1
+          fi
+          grep -q '"status":"UP"' health.json
+
       - name: Summary
         run: |
           {
             echo "### Deployed \`$FUNCTION_NAME\`"
             echo "- Commit: \`${GITHUB_SHA::7}\`"
             echo "- Region: $AWS_REGION"
+            echo "- Live page: ${{ steps.health.outputs.url }}"
             echo "- Inspector will rescan the new code automatically."
+            echo ""
+            echo "| Library | Version | Self-test |"
+            echo "|---|---|---|"
+            python3 -c "import json;d=json.load(open('health.json'));[print(f\"| {x['library']} | {x['version']} | {'pass' if x['ok'] else 'FAIL'} |\") for x in d['dependencies']]"
           } >> "$GITHUB_STEP_SUMMARY"

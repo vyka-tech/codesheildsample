@@ -25,6 +25,20 @@ Intentionally vulnerable Java 17 AWS Lambda (ZIP package), used as a test target
 - The `Dockerfile` is a **build check only**: `docker build .` runs the Maven build, which is how CodeShield
   validates a fix. It is not used for deployment.
 
+## Live endpoint
+
+Public HTTPS via a Lambda Function URL: <https://4oz5xf7m5zb65cgby22wcnwzxy0gcdcv.lambda-url.eu-west-1.on.aws/>
+
+| Route | Returns |
+|---|---|
+| `GET /` | HTML status page: greeting form, the library versions actually running, and a self-test per library |
+| `GET /api/hello?name=jane` | `{"message":"Hello, Jane!", ...}` |
+| `GET /api/health` | `{"status":"UP","dependencies":[{"library":"jackson-databind","version":"2.18.11","ok":true}, ...]}` (503 if any self-test fails) |
+
+Use it to show that a CodeShield fix kept the service working: after the PR deploys, refresh the page and the
+upgraded library shows its new version with its self-test still passing. Only `GET` is accepted, caller input is
+never logged or passed to the vulnerable library APIs, and it is HTML-escaped before being echoed.
+
 ## CI/CD (GitHub Actions)
 
 | Workflow | Trigger | What it does |

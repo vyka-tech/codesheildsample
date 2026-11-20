@@ -76,6 +76,7 @@ Resources:
                   - lambda:UpdateFunctionCode
                   - lambda:GetFunction
                   - lambda:GetFunctionConfiguration
+                  - lambda:GetFunctionUrlConfig
                   - lambda:InvokeFunction
                 Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${FunctionName}"
 
