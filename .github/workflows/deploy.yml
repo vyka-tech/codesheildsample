@@ -1,0 +1,75 @@
+# Deploy to AWS Lambda whenever main changes (e.g. after merging a CodeShield AI fix PR).
+# Uses GitHub OIDC to assume a narrowly scoped role (see infra/github-deploy-role.yml); no AWS keys are stored.
+# Inspector rescans the function automatically after the code update.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write   # required to request the OIDC token
+
+concurrency:
+  group: deploy-lambda
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-west-1
+  AWS_ROLE_ARN: arn:aws:iam::024265813171:role/codesheildsample-github-deploy
+  FUNCTION_NAME: codesheildsample
+
+jobs:
+  deploy:
+    name: Build and deploy Lambda
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Build
+        run: mvn -B -q package
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-${{ github.run_id }}
+
+      - name: Update function code
+        run: |
+          aws lambda update-function-code \
+            --function-name "$FUNCTION_NAME" \
+            --zip-file fileb://target/codesheildsample.zip \
+            --query '{sha256: CodeSha256, size: CodeSize}' --output table
+          aws lambda wait function-updated-v2 --function-name "$FUNCTION_NAME"
+
+      - name: Smoke test
+        run: |
+          aws lambda invoke --function-name "$FUNCTION_NAME" \
+            --cli-binary-format raw-in-base64-out \
+            --payload '{"name":"ci smoke test"}' \
+            --query FunctionError --output text response.json > function_error.txt
+          echo "Response:"; cat response.json; echo
+          if [ "$(cat function_error.txt)" != "None" ]; then
+            echo "::error::Lambda returned an error: $(cat function_error.txt)"
+            exit 1
+          fi
+          grep -q '"message"' response.json
+
+      - name: Summary
+        run: |
+          {
+            echo "### Deployed \`$FUNCTION_NAME\`"
+            echo "- Commit: \`${GITHUB_SHA::7}\`"
+            echo "- Region: $AWS_REGION"
+            echo "- Inspector will rescan the new code automatically."
+          } >> "$GITHUB_STEP_SUMMARY"

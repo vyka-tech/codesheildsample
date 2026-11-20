@@ -25,7 +25,27 @@ Intentionally vulnerable Java 17 AWS Lambda (ZIP package), used as a test target
 - The `Dockerfile` is a **build check only**: `docker build .` runs the Maven build, which is how CodeShield
   validates a fix. It is not used for deployment.
 
-## Build and deploy
+## CI/CD (GitHub Actions)
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| `CI` (`.github/workflows/ci.yml`) | Every PR to `main`, incl. CodeShield fix PRs | `mvn package` and checks the zip layout |
+| `Deploy` (`.github/workflows/deploy.yml`) | Push to `main` (i.e. after merging a PR), or manual | Builds the zip, updates the Lambda, runs a smoke test |
+
+Flow: CodeShield raises a PR → `CI` must pass → a reviewer merges → `Deploy` ships it → Inspector rescans the
+function and the fixed CVEs drop off the CodeShield dashboard.
+
+AWS access uses GitHub OIDC, so no AWS keys are stored in GitHub. The role is defined in
+`infra/github-deploy-role.yml`: only `main` of this repo can assume it, and it can only update, read and invoke
+the `codesheildsample` function. One-time setup (already done for account `024265813171`):
+
+```powershell
+aws cloudformation deploy --stack-name codesheildsample-github-deploy --template-file infra/github-deploy-role.yml --capabilities CAPABILITY_NAMED_IAM --region eu-west-1 --profile yogiltd
+```
+
+Recommended: protect `main` and make the `Build Lambda zip` check required.
+
+## Manual build and deploy
 
 Requires the AWS CLI, plus Maven or Docker.
 

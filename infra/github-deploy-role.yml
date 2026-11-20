@@ -1,0 +1,71 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Lets GitHub Actions in vyka-tech/codesheildsample deploy the codesheildsample Lambda using
+  short-lived OIDC credentials (no stored AWS keys). Only the main branch of this one repo can
+  assume the role, and it can only update, read and invoke this one function.
+
+Parameters:
+  GitHubOrg:
+    Type: String
+    Default: vyka-tech
+  GitHubRepo:
+    Type: String
+    Default: codesheildsample
+  FunctionName:
+    Type: String
+    Default: codesheildsample
+  CreateOidcProvider:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: Set to false if the account already has the token.actions.githubusercontent.com provider.
+
+Conditions:
+  MakeProvider: !Equals [!Ref CreateOidcProvider, "true"]
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: MakeProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      # AWS validates GitHub's certificate itself; thumbprints are kept for compatibility.
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${FunctionName}-github-deploy"
+      Description: GitHub Actions deploy role for the codesheildsample Lambda (main branch only)
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/main"
+      Policies:
+        - PolicyName: deploy-one-lambda
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:UpdateFunctionCode
+                  - lambda:GetFunction
+                  - lambda:GetFunctionConfiguration
+                  - lambda:InvokeFunction
+                Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${FunctionName}"
+
+Outputs:
+  DeployRoleArn:
+    Value: !GetAtt DeployRole.Arn
