@@ -20,6 +20,7 @@ env:
   AWS_REGION: eu-west-1
   AWS_ROLE_ARN: arn:aws:iam::024265813171:role/codesheildsample-github-deploy
   FUNCTION_NAME: codesheildsample
+  CODESHIELD_URL: https://d334aopid8kec4.cloudfront.net
 
 jobs:
   deploy:
@@ -82,6 +83,18 @@ jobs:
           fi
           grep -q '"status":"UP"' health.json
 
+      - name: Notify CodeShield (refresh vulnerability counts)
+        # Never fails the deploy: CodeShield being down must not block shipping a fix
+        continue-on-error: true
+        run: |
+          TOKEN=$(aws secretsmanager get-secret-value --secret-id codeshield/deploy-webhook-token \
+                    --query SecretString --output text | python3 -c "import json,sys;print(json.load(sys.stdin)['token'])")
+          echo "::add-mask::$TOKEN"
+          code=$(curl -s -o notify.json -w '%{http_code}' -X POST "$CODESHIELD_URL/api/cache/invalidate" \
+                   -H "X-CodeShield-Token: $TOKEN" -H 'Content-Type: application/json' \
+                   -d "{\"service\":\"$FUNCTION_NAME\"}")
+          echo "CodeShield responded HTTP $code"; cat notify.json; echo
+          [ "$code" = "202" ]
       - name: Summary
         run: |
           {
