@@ -1,20 +1,31 @@
 # codesheildsample
 
-Intentionally vulnerable Java 17 AWS Lambda (ZIP package), used as a test target for CodeShield AI.
+A small greeting web service on AWS Lambda (Java 17): type your name and it greets you, and its status page shows the library versions it runs with a live self-test for each. It is a deliberately vulnerable demo target for CodeShield AI scanning and fixing.
 
-> ⚠️ The dependency versions in `pom.xml` are deliberately outdated and have known CVEs.
-> Do not reuse them. The function has no public URL and can only be invoked with AWS credentials.
+**Service URL:** <https://4oz5xf7m5zb65cgby22wcnwzxy0gcdcv.lambda-url.eu-west-1.on.aws/>
 
-## Vulnerable dependencies
+> ⚠️ Some dependency versions in `pom.xml` are deliberately outdated and have known CVEs. Do not reuse them.
 
-| Dependency | Version | Example CVE | Fixed in |
-|---|---|---|---|
-| log4j-core / log4j-api | 2.14.1 | CVE-2021-44228 (Log4Shell) | 2.17.1 |
-| jackson-databind | 2.9.10.1 | CVE-2020-36518 | 2.12.7.1 |
-| commons-text | 1.9 | CVE-2022-42889 (Text4Shell) | 1.10.0 |
-| commons-collections | 3.2.1 | CVE-2015-7501 | 3.2.2 |
-| snakeyaml | 1.26 | CVE-2022-1471 | 2.0 |
-| guava | 29.0-jre | CVE-2023-2976 | 32.0.0-jre |
+## What it does
+
+- `GET /` shows a page with a greeting form ("Hello, Jane Doe!"), the service status, and a table of the libraries
+  running in this deployment with a pass/fail self-test for each.
+- `GET /api/hello?name=jane` returns the greeting as JSON.
+- `GET /api/health` returns `UP` plus every library version and self-test result (HTTP 503 if any fails).
+
+Try it: [greet CodeShield](https://4oz5xf7m5zb65cgby22wcnwzxy0gcdcv.lambda-url.eu-west-1.on.aws/api/hello?name=CodeShield) ·
+[health](https://4oz5xf7m5zb65cgby22wcnwzxy0gcdcv.lambda-url.eu-west-1.on.aws/api/health)
+
+## Dependencies
+
+| Dependency | Version | Status | Example CVE | Fixed in |
+|---|---|---|---|---|
+| log4j-core / log4j-api | 2.14.1 | ❌ vulnerable | CVE-2021-44228 (Log4Shell) | 2.17.1 |
+| jackson-databind | 2.18.11 | ✅ fixed by CodeShield (PR #1) | CVE-2020-36518 | 2.12.7.1 |
+| commons-text | 1.9 | ❌ vulnerable | CVE-2022-42889 (Text4Shell) | 1.10.0 |
+| commons-collections | 3.2.1 | ❌ vulnerable | CVE-2015-7501 | 3.2.2 |
+| snakeyaml | 2.0 | ✅ fixed by CodeShield (PR #2) | CVE-2022-1471 | 2.0 |
+| guava | 29.0-jre | ❌ vulnerable | CVE-2023-2976 | 32.0.0-jre |
 
 ## How it fits CodeShield AI
 
@@ -25,9 +36,9 @@ Intentionally vulnerable Java 17 AWS Lambda (ZIP package), used as a test target
 - The `Dockerfile` is a **build check only**: `docker build .` runs the Maven build, which is how CodeShield
   validates a fix. It is not used for deployment.
 
-## Live endpoint
+## Endpoint details
 
-Public HTTPS via a Lambda Function URL: <https://4oz5xf7m5zb65cgby22wcnwzxy0gcdcv.lambda-url.eu-west-1.on.aws/>
+Public HTTPS via a Lambda Function URL (see **Service URL** above).
 
 | Route | Returns |
 |---|---|
