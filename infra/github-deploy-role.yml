@@ -11,6 +11,14 @@ Parameters:
   GitHubRepo:
     Type: String
     Default: codesheildsample
+  GitHubOrgId:
+    Type: String
+    Default: "297134148"
+    Description: Numeric GitHub ID of the org (GitHub includes it in the OIDC subject for this repo)
+  GitHubRepoId:
+    Type: String
+    Default: "1465481231"
+    Description: Numeric GitHub ID of the repo
   FunctionName:
     Type: String
     Default: codesheildsample
@@ -52,7 +60,12 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/main"
+                # main branch only. GitHub sends the ID-based subject for this repo
+                # (owner@id/repo@id), which also protects against a deleted-and-recreated repo
+                # with the same name. The plain name form is accepted as a fallback.
+                token.actions.githubusercontent.com:sub:
+                  - !Sub "repo:${GitHubOrg}@${GitHubOrgId}/${GitHubRepo}@${GitHubRepoId}:ref:refs/heads/main"
+                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/main"
       Policies:
         - PolicyName: deploy-one-lambda
           PolicyDocument:
