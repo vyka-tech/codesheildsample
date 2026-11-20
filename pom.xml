@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.codeshield</groupId>
+    <artifactId>codesheildsample</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+    <name>CodeShield Sample Lambda</name>
+    <description>
+        Intentionally vulnerable Java Lambda used as a test target for CodeShield AI.
+        The dependency versions below are deliberately outdated and have known CVEs.
+        DO NOT copy these versions into a real project.
+    </description>
+
+    <properties>
+        <maven.compiler.release>17</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    </properties>
+
+    <dependencies>
+        <!-- Lambda runtime API (not vulnerable) -->
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-lambda-java-core</artifactId>
+            <version>1.2.3</version>
+        </dependency>
+
+        <!-- ===== INTENTIONALLY VULNERABLE DEPENDENCIES ===== -->
+
+        <!-- CRITICAL: CVE-2021-44228 (Log4Shell), CVE-2021-45046. Fixed in 2.17.1+ -->
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-api</artifactId>
+            <version>2.14.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-core</artifactId>
+            <version>2.14.1</version>
+        </dependency>
+
+        <!-- CRITICAL/HIGH: many deserialization CVEs (e.g. CVE-2020-36518). Fixed in 2.12.7.1+ / 2.13.4.2+ -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.9.10.1</version>
+        </dependency>
+
+        <!-- CRITICAL: CVE-2022-42889 (Text4Shell). Fixed in 1.10.0 -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-text</artifactId>
+            <version>1.9</version>
+        </dependency>
+
+        <!-- CRITICAL: CVE-2015-7501 / CVE-2015-6420 (deserialization). Fixed in 3.2.2 -->
+        <dependency>
+            <groupId>commons-collections</groupId>
+            <artifactId>commons-collections</artifactId>
+            <version>3.2.1</version>
+        </dependency>
+
+        <!-- HIGH: CVE-2022-1471 and others. Fixed in 2.0 -->
+        <dependency>
+            <groupId>org.yaml</groupId>
+            <artifactId>snakeyaml</artifactId>
+            <version>1.26</version>
+        </dependency>
+
+        <!-- MEDIUM/LOW: CVE-2023-2976, CVE-2020-8908. Fixed in 32.0.0-jre -->
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>29.0-jre</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Copy runtime jars to target/dependency so the Dockerfile can place them in
+                 ${LAMBDA_TASK_ROOT}/lib as individual jars (lets Inspector detect each one). -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <version>3.6.1</version>
+                <executions>
+                    <execution>
+                        <id>copy-dependencies</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-dependencies</goal>
+                        </goals>
+                        <configuration>
+                            <includeScope>runtime</includeScope>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -1,0 +1,6 @@
+service: codesheildsample
+greeting: Hello
+features:
+  - greeting
+  - yaml-config
+  - json-response
